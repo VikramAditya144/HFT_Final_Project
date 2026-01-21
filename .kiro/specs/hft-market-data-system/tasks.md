@@ -64,15 +64,15 @@ The plan follows a "commit-per-feature" approach where each commit:
     - **Validates: Requirements 4.4, 4.5**
     - **Commit**: "test: add property tests for buffer overflow/underflow"
 
-- [ ] 5. Shared Memory Management
-  - [ ] 5.1 Implement SharedMemory wrapper class
+- [x] 5. Shared Memory Management
+  - [x] 5.1 Implement SharedMemory wrapper class
     - Create include/common/shared_memory.hpp
     - POSIX shm_open/mmap/shm_unlink wrapper
     - RAII resource management
     - _Requirements: 5.1, 5.2, 5.3_
     - **Commit**: "feat: add POSIX shared memory wrapper with RAII"
 
-  - [ ] 5.2 Write unit tests for shared memory operations
+  - [x] 5.2 Write unit tests for shared memory operations
     - Test creation, mapping, and cleanup
     - Test error conditions and edge cases
     - _Requirements: 5.1, 5.2, 5.3_

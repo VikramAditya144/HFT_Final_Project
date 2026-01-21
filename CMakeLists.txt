@@ -160,8 +160,26 @@ target_link_libraries(property_tests
         nlohmann_json::nlohmann_json
 )
 
-# Register the test with CTest
+# --- Shared memory unit tests ---
+add_executable(shared_memory_tests
+    tests/test_shared_memory.cpp
+)
+target_link_libraries(shared_memory_tests
+    PRIVATE
+        Catch2::Catch2WithMain
+        fmt::fmt
+        nlohmann_json::nlohmann_json
+)
+
+# On Linux, we need librt for shm_open/shm_unlink
+# macOS includes these in the system library, no extra link needed
+if(NOT APPLE)
+    target_link_libraries(shared_memory_tests PRIVATE rt)
+endif()
+
+# Register the tests with CTest
 add_test(NAME PropertyTests COMMAND property_tests)
+add_test(NAME SharedMemoryTests COMMAND shared_memory_tests)
 
 # ============================================================================
 # SUMMARY
