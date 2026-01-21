@@ -29,7 +29,7 @@ constexpr size_t INSTRUMENT_MAX_LEN = 16;
 // MarketData Structure
 // ============================================================================
 //
-// MEMORY LAYOUT (on 64-bit systems):
+// MEMORY LAYOUT (on 64-bit systems with 64-byte alignment):
 //
 //   Offset    Size    Field
 //   ------    ----    -----
@@ -37,8 +37,17 @@ constexpr size_t INSTRUMENT_MAX_LEN = 16;
 //   16        8       bid             (double)
 //   24        8       ask             (double)
 //   32        8       timestamp_ns    (int64_t)
+//   40        24      padding         (explicit padding to 64 bytes)
 //   ------
-//   Total:    40 bytes
+//   Total:    64 bytes (cache-line aligned)
+//
+// WHY 64-BYTE ALIGNMENT?
+//   - Modern CPUs have 64-byte cache lines
+//   - Aligning to cache line boundaries prevents "false sharing"
+//   - False sharing occurs when two threads access different variables
+//     that happen to be on the same cache line, causing unnecessary
+//     cache coherency traffic
+//   - In HFT systems, this alignment is critical for performance
 //
 // WHY FIXED-SIZE ARRAYS INSTEAD OF std::string?
 //   - std::string allocates memory on the HEAP
@@ -53,7 +62,7 @@ constexpr size_t INSTRUMENT_MAX_LEN = 16;
 //     (e.g., price * 10000 stored as int64_t)
 //
 
-struct MarketData {
+struct alignas(64) MarketData {
   // Instrument symbol (e.g., "RELIANCE", "AAPL", "GOOG")
   // Fixed 16-byte array, null-terminated
   char instrument[INSTRUMENT_MAX_LEN];
@@ -69,6 +78,10 @@ struct MarketData {
   // We use nanoseconds because in HFT, microseconds aren't precise enough
   int64_t timestamp_ns;
 
+  // Explicit padding to ensure 64-byte alignment
+  // 64 - (16 + 8 + 8 + 8) = 24 bytes of padding needed
+  char padding[24];
+
   // ========================================================================
   // CONSTRUCTORS
   // ========================================================================
@@ -78,6 +91,8 @@ struct MarketData {
   MarketData() : bid(0.0), ask(0.0), timestamp_ns(0) {
     // Fill instrument with zeros (null bytes)
     std::memset(instrument, 0, INSTRUMENT_MAX_LEN);
+    // Initialize padding to zero for consistent memory layout
+    std::memset(padding, 0, sizeof(padding));
   }
 
   // Parameterized constructor for convenience
@@ -88,6 +103,8 @@ struct MarketData {
     // This prevents buffer overflow if 'inst' is too long
     std::strncpy(instrument, inst, INSTRUMENT_MAX_LEN - 1);
     instrument[INSTRUMENT_MAX_LEN - 1] = '\0'; // Ensure null termination
+    // Initialize padding to zero for consistent memory layout
+    std::memset(padding, 0, sizeof(padding));
   }
 
   // ========================================================================
@@ -145,8 +162,11 @@ struct MarketData {
 // static_assert runs at COMPILE TIME, not runtime
 // If these fail, compilation stops with an error message
 
-// Verify our size assumptions (might differ on 32-bit systems)
-static_assert(sizeof(MarketData) == 40, "MarketData size should be 40 bytes");
+// Verify our size assumptions - should be exactly 64 bytes for cache alignment
+static_assert(sizeof(MarketData) == 64, "MarketData size should be 64 bytes for cache line alignment");
+
+// Verify alignment is correct
+static_assert(alignof(MarketData) == 64, "MarketData should be aligned to 64-byte boundaries");
 
 // Verify timestamp can hold nanoseconds for a long time
 static_assert(sizeof(int64_t) == 8,

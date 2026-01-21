@@ -20,15 +20,15 @@ The plan follows a "commit-per-feature" approach where each commit:
   - _Requirements: 10.1, 10.5_
   - **Commit**: "feat: initial project structure and CMake setup"
 
-- [ ] 2. Core Data Structures
-  - [ ] 2.1 Define MarketData struct with proper alignment
+- [x] 2. Core Data Structures
+  - [x] 2.1 Define MarketData struct with proper alignment
     - Create include/common/market_data.hpp
     - Implement 64-byte aligned MarketData structure
     - Add JSON serialization support with nlohmann/json
     - _Requirements: 1.1, 1.3, 1.4_
     - **Commit**: "feat: add MarketData struct with alignment and JSON support"
 
-  - [ ] 2.2 Write property test for MarketData structure
+  - [x] 2.2 Write property test for MarketData structure
     - **Property 1: Market data structure completeness**
     - **Validates: Requirements 1.1, 1.4**
     - **Commit**: "test: add property tests for MarketData structure"

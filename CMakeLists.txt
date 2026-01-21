@@ -80,6 +80,14 @@ FetchContent_Declare(
 # Download json only
 FetchContent_MakeAvailable(json)
 
+# --- Catch2 (Testing framework) ---
+FetchContent_Declare(
+    Catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG        v3.7.1
+)
+FetchContent_MakeAvailable(Catch2)
+
 # ============================================================================
 # INCLUDE DIRECTORIES
 # ============================================================================
@@ -133,6 +141,27 @@ target_link_libraries(tcp_consumer
         fmt::fmt
         nlohmann_json::nlohmann_json
 )
+
+# ============================================================================
+# TEST TARGETS
+# ============================================================================
+
+# Enable testing
+enable_testing()
+
+# --- Property-based tests ---
+add_executable(property_tests
+    tests/test_market_data.cpp
+)
+target_link_libraries(property_tests
+    PRIVATE
+        Catch2::Catch2WithMain
+        fmt::fmt
+        nlohmann_json::nlohmann_json
+)
+
+# Register the test with CTest
+add_test(NAME PropertyTests COMMAND property_tests)
 
 # ============================================================================
 # SUMMARY
