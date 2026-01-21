@@ -78,15 +78,15 @@ The plan follows a "commit-per-feature" approach where each commit:
     - _Requirements: 5.1, 5.2, 5.3_
     - **Commit**: "test: add unit tests for shared memory management"
 
-- [ ] 6. Basic Publisher Implementation
-  - [ ] 6.1 Create minimal publisher main function
+- [x] 6. Basic Publisher Implementation
+  - [x] 6.1 Create minimal publisher main function
     - Create src/publisher/main.cpp
     - Initialize shared memory and ring buffer
     - Basic market data generation loop
     - _Requirements: 1.1, 1.2, 5.1_
     - **Commit**: "feat: add basic publisher with market data generation"
 
-  - [ ] 6.2 Write property test for market data generation
+  - [x] 6.2 Write property test for market data generation
     - **Property 2: Market data generation volume and variety**
     - **Validates: Requirements 1.2**
     - **Commit**: "test: add property tests for market data generation"

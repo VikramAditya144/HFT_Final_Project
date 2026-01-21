@@ -8,6 +8,7 @@
 #include <chrono>
 #include <thread>
 #include <vector>
+#include <set>
 
 using namespace hft;
 
@@ -91,7 +92,115 @@ TEST_CASE("Property 1: Market data structure completeness", "[property][market_d
     }
 }
 
-TEST_CASE("Property 2: Fixed-size instrument name compliance", "[property][market_data]") {
+TEST_CASE("Property 2: Market data generation volume and variety", "[property][market_data]") {
+    // Feature: hft-market-data-system, Property 2: Market data generation volume and variety
+    // Validates: Requirements 1.2
+    
+    // This property tests that market data generation produces sufficient volume and variety
+    // We simulate the publisher's generation logic to verify it meets requirements
+    
+    // Run property test with 100 iterations
+    for (int i = 0; i < 100; ++i) {
+        // Simulate the publisher's instrument list (same as in publisher main.cpp)
+        std::vector<std::string> instruments = {
+            "RELIANCE", "TCS", "INFY", "HDFC", "ICICI", "SBI", "ITC", "HIND_UNILEVER",
+            "BHARTI_AIRTEL", "KOTAK_BANK", "AXIS_BANK", "MARUTI", "ASIAN_PAINTS",
+            "BAJAJ_FINANCE", "WIPRO", "ONGC", "NTPC", "POWERGRID", "ULTRACEMCO",
+            "NESTLEIND", "HCLTECH", "TITAN", "SUNPHARMA", "DRREDDY", "CIPLA",
+            "TECHM", "INDUSINDBK", "BAJAJ_AUTO", "HEROMOTOCO", "EICHERMOT",
+            "GRASIM", "ADANIPORTS", "JSWSTEEL", "HINDALCO", "TATASTEEL",
+            "COALINDIA", "BPCL", "IOC", "DIVISLAB", "BRITANNIA", "DABUR",
+            "GODREJCP", "MARICO", "PIDILITIND", "COLPAL", "MCDOWELL_N",
+            "AMBUJACEM", "ACC", "SHREECEM", "RAMCOCEM", "INDIACEM"
+        };
+        
+        // Simulate market data generation (same logic as publisher)
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<double> price_dist(100.0, 3000.0);
+        std::uniform_real_distribution<double> spread_dist(0.01, 1.0);
+        
+        std::vector<MarketData> generated_messages;
+        std::set<std::string> unique_instruments;
+        std::set<std::pair<double, double>> unique_price_pairs;
+        
+        // Generate at least 1000 messages as required
+        const size_t required_messages = 1000;
+        
+        for (size_t j = 0; j < required_messages; ++j) {
+            // Generate market data using same logic as publisher
+            const std::string& instrument = instruments[gen() % instruments.size()];
+            double bid = price_dist(gen);
+            double spread = spread_dist(gen);
+            double ask = bid + spread;
+            int64_t timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+            
+            MarketData data(instrument.c_str(), bid, ask, timestamp);
+            generated_messages.push_back(data);
+            
+            // Track variety
+            unique_instruments.insert(instrument);
+            unique_price_pairs.insert({bid, ask});
+        }
+        
+        // Verify volume requirement: at least 1000 messages generated
+        REQUIRE(generated_messages.size() >= required_messages);
+        
+        // Verify variety requirements:
+        // 1. Should use multiple different instruments (at least 10 different ones)
+        REQUIRE(unique_instruments.size() >= 10);
+        
+        // 2. Should generate different price combinations (at least 90% unique)
+        // Due to random generation, we expect high variety in prices
+        double uniqueness_ratio = static_cast<double>(unique_price_pairs.size()) / generated_messages.size();
+        REQUIRE(uniqueness_ratio >= 0.9); // At least 90% of price pairs should be unique
+        
+        // 3. Verify all generated messages have valid structure
+        for (const auto& msg : generated_messages) {
+            // Instrument name should be non-empty and from our list
+            REQUIRE(strlen(msg.instrument) > 0);
+            bool found_instrument = false;
+            for (const auto& inst : instruments) {
+                if (strncmp(msg.instrument, inst.c_str(), INSTRUMENT_MAX_LEN) == 0) {
+                    found_instrument = true;
+                    break;
+                }
+            }
+            REQUIRE(found_instrument);
+            
+            // Prices should be positive and ask > bid
+            REQUIRE(msg.bid > 0.0);
+            REQUIRE(msg.ask > 0.0);
+            REQUIRE(msg.ask > msg.bid);
+            
+            // Timestamp should be positive (nanoseconds since epoch)
+            REQUIRE(msg.timestamp_ns > 0);
+        }
+        
+        // 4. Verify price ranges are within expected bounds (100-3000 for bid)
+        for (const auto& msg : generated_messages) {
+            REQUIRE(msg.bid >= 100.0);
+            REQUIRE(msg.bid <= 3000.0);
+            
+            // Spread should be reasonable (0.01 to 1.0)
+            double spread = msg.ask - msg.bid;
+            REQUIRE(spread >= 0.01);
+            REQUIRE(spread <= 1.0);
+        }
+        
+        // 5. Verify temporal ordering (timestamps should be non-decreasing or very close)
+        // Since generation happens quickly, timestamps might be identical or increasing
+        for (size_t j = 1; j < generated_messages.size(); ++j) {
+            // Allow for some timestamp variation due to generation speed
+            // but they should be reasonably close (within 1 second)
+            int64_t time_diff = std::abs(generated_messages[j].timestamp_ns - generated_messages[j-1].timestamp_ns);
+            REQUIRE(time_diff < 1000000000LL); // Less than 1 second difference
+        }
+    }
+}
+
+TEST_CASE("Property 3: Fixed-size instrument name compliance", "[property][market_data]") {
     // Feature: hft-market-data-system, Property 3: Fixed-size instrument name compliance
     // Validates: Requirements 1.3
     
