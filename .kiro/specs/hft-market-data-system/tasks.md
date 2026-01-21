@@ -46,20 +46,20 @@ The plan follows a "commit-per-feature" approach where each commit:
     - **Validates: Requirements 7.1**
     - **Commit**: "test: add property tests for FastClock precision"
 
-- [ ] 4. Shared Memory Ring Buffer
-  - [ ] 4.1 Implement lock-free ring buffer structure
+- [x] 4. Shared Memory Ring Buffer
+  - [x] 4.1 Implement lock-free ring buffer structure
     - Create include/common/ring_buffer.hpp
     - SPSC design with atomic indices
     - 64-byte alignment to prevent false sharing
     - _Requirements: 4.1, 4.2, 4.3_
     - **Commit**: "feat: implement lock-free SPSC ring buffer"
 
-  - [ ] 4.2 Write property test for ring buffer correctness
+  - [x] 4.2 Write property test for ring buffer correctness
     - **Property 9: Lock-free ring buffer correctness**
     - **Validates: Requirements 4.1, 4.2**
     - **Commit**: "test: add property tests for ring buffer operations"
 
-  - [ ] 4.3 Write property test for buffer state management
+  - [x] 4.3 Write property test for buffer state management
     - **Property 11: Ring buffer state management**
     - **Validates: Requirements 4.4, 4.5**
     - **Commit**: "test: add property tests for buffer overflow/underflow"

@@ -1,11 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <common/market_data.hpp>
 #include <common/fast_clock.hpp>
+#include <common/ring_buffer.hpp>
 #include <string>
 #include <cstring>
 #include <random>
 #include <chrono>
 #include <thread>
+#include <vector>
 
 using namespace hft;
 
@@ -227,5 +229,200 @@ TEST_CASE("Property 13: Fast clock performance and precision", "[property][fast_
         // 1000 calls should complete very quickly (much less than 1ms)
         auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
         REQUIRE(duration_us < 1000); // Should complete in less than 1ms
+    }
+}
+TEST_CASE("Property 9: Lock-free ring buffer correctness", "[property][ring_buffer]") {
+    // Feature: hft-market-data-system, Property 9: Lock-free ring buffer correctness
+    // Validates: Requirements 4.1, 4.2
+    
+    // Run property test with 100 iterations
+    for (int i = 0; i < 100; ++i) {
+        RingBuffer buffer;
+        
+        // Verify initial state
+        REQUIRE(buffer.is_empty());
+        REQUIRE_FALSE(buffer.is_full());
+        REQUIRE(buffer.available_for_read() == 0);
+        REQUIRE(buffer.available_for_write() == buffer.capacity());
+        
+        // Generate random test data
+        std::vector<MarketData> test_data;
+        int num_items = std::min(static_cast<int>(buffer.capacity()), 100 + (i % 500));
+        
+        for (int j = 0; j < num_items; ++j) {
+            auto instrument = PropertyTestHelper::generateRandomInstrument();
+            auto bid = PropertyTestHelper::generateRandomPrice();
+            auto ask = PropertyTestHelper::generateRandomPrice();
+            auto timestamp_ns = PropertyTestHelper::generateRandomTimestamp();
+            
+            test_data.emplace_back(instrument.c_str(), bid, ask, timestamp_ns);
+        }
+        
+        // Test writing data
+        for (size_t j = 0; j < test_data.size(); ++j) {
+            bool write_success = buffer.try_write(test_data[j]);
+            REQUIRE(write_success);
+            
+            // Verify buffer state after each write
+            REQUIRE(buffer.available_for_read() == j + 1);
+            REQUIRE(buffer.available_for_write() == buffer.capacity() - (j + 1));
+            REQUIRE_FALSE(buffer.is_empty());
+        }
+        
+        // Verify buffer is full after writing capacity items
+        if (test_data.size() == buffer.capacity()) {
+            REQUIRE(buffer.is_full());
+            REQUIRE(buffer.available_for_write() == 0);
+            
+            // Try to write one more item - should fail
+            MarketData extra_data("EXTRA", 100.0, 101.0, 123456789);
+            REQUIRE_FALSE(buffer.try_write(extra_data));
+        }
+        
+        // Test reading data back
+        std::vector<MarketData> read_data;
+        MarketData read_item;
+        
+        while (buffer.try_read(read_item)) {
+            read_data.push_back(read_item);
+        }
+        
+        // Verify we read back the same number of items
+        REQUIRE(read_data.size() == test_data.size());
+        
+        // Verify data integrity - all written data should be read back correctly
+        for (size_t j = 0; j < test_data.size(); ++j) {
+            REQUIRE(strcmp(test_data[j].instrument, read_data[j].instrument) == 0);
+            REQUIRE(test_data[j].bid == read_data[j].bid);
+            REQUIRE(test_data[j].ask == read_data[j].ask);
+            REQUIRE(test_data[j].timestamp_ns == read_data[j].timestamp_ns);
+        }
+        
+        // Verify buffer is empty after reading all data
+        REQUIRE(buffer.is_empty());
+        REQUIRE_FALSE(buffer.is_full());
+        REQUIRE(buffer.available_for_read() == 0);
+        REQUIRE(buffer.available_for_write() == buffer.capacity());
+        
+        // Try to read from empty buffer - should fail
+        MarketData empty_read;
+        REQUIRE_FALSE(buffer.try_read(empty_read));
+    }
+}
+TEST_CASE("Property 11: Ring buffer state management", "[property][ring_buffer]") {
+    // Feature: hft-market-data-system, Property 11: Ring buffer state management
+    // Validates: Requirements 4.4, 4.5
+    
+    // Run property test with 100 iterations
+    for (int i = 0; i < 100; ++i) {
+        RingBuffer buffer;
+        
+        // Test overflow detection (buffer full condition)
+        // Fill the buffer to capacity
+        std::vector<MarketData> test_data;
+        for (size_t j = 0; j < buffer.capacity(); ++j) {
+            auto instrument = PropertyTestHelper::generateRandomInstrument();
+            auto bid = PropertyTestHelper::generateRandomPrice();
+            auto ask = PropertyTestHelper::generateRandomPrice();
+            auto timestamp_ns = PropertyTestHelper::generateRandomTimestamp();
+            
+            MarketData data(instrument.c_str(), bid, ask, timestamp_ns);
+            test_data.push_back(data);
+            
+            bool write_success = buffer.try_write(data);
+            REQUIRE(write_success);
+        }
+        
+        // Verify buffer is now full
+        REQUIRE(buffer.is_full());
+        REQUIRE(buffer.available_for_write() == 0);
+        REQUIRE(buffer.available_for_read() == buffer.capacity());
+        REQUIRE_FALSE(buffer.is_empty());
+        
+        // Test overflow condition - trying to write to full buffer should fail
+        MarketData overflow_data("OVERFLOW", 999.99, 1000.01, 987654321);
+        bool overflow_write = buffer.try_write(overflow_data);
+        REQUIRE_FALSE(overflow_write); // Should indicate overflow condition
+        
+        // Verify buffer state remains unchanged after failed write
+        REQUIRE(buffer.is_full());
+        REQUIRE(buffer.available_for_write() == 0);
+        REQUIRE(buffer.available_for_read() == buffer.capacity());
+        
+        // Test underflow detection (buffer empty condition)
+        // Empty the buffer completely
+        MarketData read_item;
+        size_t items_read = 0;
+        while (buffer.try_read(read_item)) {
+            items_read++;
+        }
+        
+        // Verify we read exactly the number of items we wrote
+        REQUIRE(items_read == buffer.capacity());
+        
+        // Verify buffer is now empty
+        REQUIRE(buffer.is_empty());
+        REQUIRE(buffer.available_for_read() == 0);
+        REQUIRE(buffer.available_for_write() == buffer.capacity());
+        REQUIRE_FALSE(buffer.is_full());
+        
+        // Test underflow condition - trying to read from empty buffer should fail
+        MarketData underflow_data;
+        bool underflow_read = buffer.try_read(underflow_data);
+        REQUIRE_FALSE(underflow_read); // Should indicate underflow condition
+        
+        // Verify buffer state remains unchanged after failed read
+        REQUIRE(buffer.is_empty());
+        REQUIRE(buffer.available_for_read() == 0);
+        REQUIRE(buffer.available_for_write() == buffer.capacity());
+        
+        // Test partial fill/empty states
+        // Fill buffer partially (random amount between 1 and capacity-1)
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+        std::uniform_int_distribution<size_t> partial_dist(1, buffer.capacity() - 1);
+        size_t partial_fill = partial_dist(gen);
+        
+        for (size_t j = 0; j < partial_fill; ++j) {
+            auto instrument = PropertyTestHelper::generateRandomInstrument();
+            auto bid = PropertyTestHelper::generateRandomPrice();
+            auto ask = PropertyTestHelper::generateRandomPrice();
+            auto timestamp_ns = PropertyTestHelper::generateRandomTimestamp();
+            
+            MarketData data(instrument.c_str(), bid, ask, timestamp_ns);
+            bool write_success = buffer.try_write(data);
+            REQUIRE(write_success);
+        }
+        
+        // Verify partial state is correctly detected
+        REQUIRE_FALSE(buffer.is_empty());
+        REQUIRE_FALSE(buffer.is_full());
+        REQUIRE(buffer.available_for_read() == partial_fill);
+        REQUIRE(buffer.available_for_write() == buffer.capacity() - partial_fill);
+        
+        // Verify we can still write and read in partial state
+        MarketData partial_write_data("PARTIAL", 123.45, 123.67, 555666777);
+        bool partial_write_success = buffer.try_write(partial_write_data);
+        REQUIRE(partial_write_success);
+        
+        MarketData partial_read_data;
+        bool partial_read_success = buffer.try_read(partial_read_data);
+        REQUIRE(partial_read_success);
+        
+        // Test state transitions
+        // The buffer should correctly transition between empty, partial, and full states
+        // This is implicitly tested by the operations above, but we verify the
+        // state consistency throughout the transitions
+        bool empty_state_consistent = buffer.is_empty() ? (buffer.available_for_read() == 0) : true;
+        bool non_empty_state_consistent = !buffer.is_empty() ? (buffer.available_for_read() > 0) : true;
+        REQUIRE(empty_state_consistent);
+        REQUIRE(non_empty_state_consistent);
+        
+        bool full_state_consistent = buffer.is_full() ? (buffer.available_for_write() == 0) : true;
+        bool non_full_state_consistent = !buffer.is_full() ? (buffer.available_for_write() > 0) : true;
+        REQUIRE(full_state_consistent);
+        REQUIRE(non_full_state_consistent);
+        
+        REQUIRE(buffer.available_for_read() + buffer.available_for_write() == buffer.capacity());
     }
 }
