@@ -1242,3 +1242,130 @@ TEST_CASE("Property 12: Shared memory consumer polling", "[property][shm_consume
         REQUIRE(duration_us < 1000); // Should complete in less than 1ms
     }
 }
+
+// ============================================================================
+// LATENCY MEASUREMENT PROPERTY TESTS
+// ============================================================================
+
+TEST_CASE("Property 14: Timestamp embedding consistency", "[property][latency]") {
+    // Feature: hft-market-data-system, Property 14: Timestamp embedding consistency
+    // Validates: Requirements 9.1
+    
+    // Test that all market data messages contain valid send timestamps
+    // that can be used for latency calculation
+    
+    const int num_tests = 100;
+    
+    for (int i = 0; i < num_tests; ++i) {
+        // Generate random market data
+        auto instrument = PropertyTestHelper::generateRandomInstrument();
+        auto bid = PropertyTestHelper::generateRandomPrice();
+        auto ask = PropertyTestHelper::generateRandomPrice();
+        
+        // Use FastClock to generate timestamp (same as publisher)
+        FastClock fast_clock;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1)); // Let clock initialize
+        int64_t send_timestamp = fast_clock.now();
+        
+        // Create market data with embedded timestamp
+        MarketData market_data(instrument.c_str(), bid, ask, send_timestamp);
+        
+        // Verify timestamp is properly embedded
+        REQUIRE(market_data.timestamp_ns == send_timestamp);
+        REQUIRE(market_data.timestamp_ns > 0);
+        
+        // Verify timestamp is reasonable (within last few seconds)
+        auto current_time = std::chrono::high_resolution_clock::now();
+        auto current_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            current_time.time_since_epoch()).count();
+        
+        // Timestamp should be within reasonable range (not too old, not in future)
+        int64_t time_diff = std::abs(current_ns - market_data.timestamp_ns);
+        REQUIRE(time_diff < 10000000000LL); // Within 10 seconds
+        
+        // Test JSON serialization preserves timestamp
+        std::string json = market_data.to_json();
+        MarketData parsed_data;
+        bool parse_success = MarketData::from_json(json, parsed_data);
+        
+        REQUIRE(parse_success);
+        REQUIRE(parsed_data.timestamp_ns == send_timestamp);
+        
+        // Test that timestamp is preserved in shared memory (binary copy)
+        MarketData copied_data = market_data; // Copy constructor
+        REQUIRE(copied_data.timestamp_ns == send_timestamp);
+    }
+}
+
+TEST_CASE("Property 15: Latency calculation accuracy", "[property][latency]") {
+    // Feature: hft-market-data-system, Property 15: Latency calculation accuracy
+    // Validates: Requirements 9.2, 9.3
+    
+    // Test that latency calculation (receive_time - message_timestamp) produces
+    // positive and reasonable results for both TCP and SHM consumers
+    
+    const int num_tests = 100;
+    
+    for (int i = 0; i < num_tests; ++i) {
+        // Generate random market data with send timestamp
+        auto instrument = PropertyTestHelper::generateRandomInstrument();
+        auto bid = PropertyTestHelper::generateRandomPrice();
+        auto ask = PropertyTestHelper::generateRandomPrice();
+        
+        // Simulate message creation time (in the past)
+        auto send_time = std::chrono::high_resolution_clock::now() - 
+                        std::chrono::microseconds(rand() % 10000); // 0-10ms ago
+        auto send_timestamp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            send_time.time_since_epoch()).count();
+        
+        MarketData market_data(instrument.c_str(), bid, ask, send_timestamp_ns);
+        
+        // Simulate receive time (now)
+        auto receive_time = std::chrono::high_resolution_clock::now();
+        auto receive_timestamp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            receive_time.time_since_epoch()).count();
+        
+        // Calculate latency (same formula used by consumers)
+        int64_t latency_ns = receive_timestamp_ns - market_data.timestamp_ns;
+        double latency_us = latency_ns / 1000.0;
+        
+        // Verify latency calculation properties
+        REQUIRE(latency_ns >= 0); // Latency should be positive (receive after send)
+        REQUIRE(latency_ns < 100000000LL); // Should be less than 100ms (reasonable)
+        REQUIRE(latency_us >= 0.0); // Microsecond conversion should be positive
+        
+        // Test edge case: same timestamp (zero latency)
+        MarketData zero_latency_data(instrument.c_str(), bid, ask, receive_timestamp_ns);
+        int64_t zero_latency = receive_timestamp_ns - zero_latency_data.timestamp_ns;
+        REQUIRE(zero_latency == 0);
+        
+        // Test that latency increases with time delay
+        std::this_thread::sleep_for(std::chrono::microseconds(100)); // Small delay
+        auto delayed_receive_time = std::chrono::high_resolution_clock::now();
+        auto delayed_receive_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            delayed_receive_time.time_since_epoch()).count();
+        
+        int64_t delayed_latency = delayed_receive_ns - market_data.timestamp_ns;
+        REQUIRE(delayed_latency > latency_ns); // Should be higher due to delay
+        
+        // Verify latency statistics calculations (used by consumers)
+        std::vector<int64_t> latencies = {latency_ns, delayed_latency, zero_latency};
+        
+        int64_t total_latency = 0;
+        int64_t min_latency = INT64_MAX;
+        int64_t max_latency = 0;
+        
+        for (auto lat : latencies) {
+            total_latency += lat;
+            min_latency = std::min(min_latency, lat);
+            max_latency = std::max(max_latency, lat);
+        }
+        
+        double avg_latency = total_latency / static_cast<double>(latencies.size());
+        
+        REQUIRE(min_latency <= avg_latency);
+        REQUIRE(avg_latency <= max_latency);
+        REQUIRE(min_latency == zero_latency); // Zero should be minimum
+        REQUIRE(max_latency == delayed_latency); // Delayed should be maximum
+    }
+}

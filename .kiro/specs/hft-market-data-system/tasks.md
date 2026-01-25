@@ -147,20 +147,20 @@ The plan follows a "commit-per-feature" approach where each commit:
     - **Validates: Requirements 6.2**
     - **Commit**: "test: add property tests for SHM consumer polling"
 
-- [ ] 10. Latency Measurement Implementation
-  - [ ] 10.1 Add timestamp embedding in publisher
+- [x] 10. Latency Measurement Implementation
+  - [x] 10.1 Add timestamp embedding in publisher
     - Use FastClock for message timestamping
     - Embed timestamps in both TCP and SHM messages
     - _Requirements: 9.1, 7.5_
     - **Commit**: "feat: add timestamp embedding for latency measurement"
 
-  - [ ] 10.2 Add latency calculation in consumers
+  - [x] 10.2 Add latency calculation in consumers
     - Calculate receive_time - message_timestamp
     - Log latency measurements with statistics
     - _Requirements: 9.2, 9.3, 9.4_
     - **Commit**: "feat: add latency calculation and logging"
 
-  - [ ] 10.3 Write property tests for latency measurement
+  - [x] 10.3 Write property tests for latency measurement
     - **Property 14: Timestamp embedding consistency**
     - **Property 15: Latency calculation accuracy**
     - **Validates: Requirements 9.1, 9.2, 9.3**

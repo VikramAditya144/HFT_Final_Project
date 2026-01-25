@@ -49,6 +49,11 @@ int main() {
     size_t parse_errors = 0;
     boost::asio::streambuf buffer;
     
+    // Latency statistics tracking
+    int64_t total_latency_ns = 0;
+    int64_t min_latency_ns = INT64_MAX;
+    int64_t max_latency_ns = 0;
+    
     while (true) {
       try {
         // Read until newline (message boundary)
@@ -80,6 +85,11 @@ int main() {
             int64_t latency_ns = receive_time_ns - market_data.timestamp_ns;
             double latency_us = latency_ns / 1000.0; // Convert to microseconds
             
+            // Update latency statistics
+            total_latency_ns += latency_ns;
+            min_latency_ns = std::min(min_latency_ns, latency_ns);
+            max_latency_ns = std::max(max_latency_ns, latency_ns);
+            
             // ============================================================
             // STEP 4: Structured logging with fmt
             // ============================================================
@@ -90,10 +100,15 @@ int main() {
                       market_data.ask,
                       latency_us);
             
-            // Every 10 messages, print a summary
+            // Every 10 messages, print latency statistics
             if (message_count % 10 == 0) {
-              fmt::print("--- Processed {} messages, {} parse errors ---\n", 
-                        message_count, parse_errors);
+              double avg_latency_us = (total_latency_ns / message_count) / 1000.0;
+              double min_latency_us = min_latency_ns / 1000.0;
+              double max_latency_us = max_latency_ns / 1000.0;
+              
+              fmt::print("--- TCP Latency Stats after {} messages ---\n", message_count);
+              fmt::print("Average latency: {:.3f}μs | Min: {:.3f}μs | Max: {:.3f}μs | Parse errors: {}\n", 
+                        avg_latency_us, min_latency_us, max_latency_us, parse_errors);
             }
             
           } else {
@@ -106,6 +121,21 @@ int main() {
           if (message_count >= 50) {
             fmt::print("\nReceived and parsed {} messages successfully!\n", message_count);
             fmt::print("Parse errors: {}\n", parse_errors);
+            
+            // Final latency statistics
+            if (message_count > 0) {
+              double avg_latency_us = (total_latency_ns / message_count) / 1000.0;
+              double min_latency_us = min_latency_ns / 1000.0;
+              double max_latency_us = max_latency_ns / 1000.0;
+              
+              fmt::print("\n=== Final TCP Latency Statistics ===\n");
+              fmt::print("Messages processed: {}\n", message_count);
+              fmt::print("Average latency: {:.3f}μs\n", avg_latency_us);
+              fmt::print("Min latency: {:.3f}μs\n", min_latency_us);
+              fmt::print("Max latency: {:.3f}μs\n", max_latency_us);
+              fmt::print("Parse errors: {}\n", parse_errors);
+              fmt::print("====================================\n");
+            }
             break;
           }
         }
