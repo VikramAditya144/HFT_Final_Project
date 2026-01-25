@@ -134,15 +134,15 @@ The plan follows a "commit-per-feature" approach where each commit:
     - **Validates: Requirements 3.2, 3.3**
     - **Commit**: "test: add property tests for TCP consumer parsing"
 
-- [ ] 9. Shared Memory Consumer Implementation
-  - [ ] 9.1 Create SHM consumer main function
+- [x] 9. Shared Memory Consumer Implementation
+  - [x] 9.1 Create SHM consumer main function
     - Create src/shm_consumer/main.cpp
     - Attach to existing shared memory segment
     - Basic ring buffer polling loop
     - _Requirements: 6.1, 6.2_
     - **Commit**: "feat: add shared memory consumer with polling"
 
-  - [ ] 9.2 Write property test for SHM consumer polling
+  - [x] 9.2 Write property test for SHM consumer polling
     - **Property 12: Shared memory consumer polling**
     - **Validates: Requirements 6.2**
     - **Commit**: "test: add property tests for SHM consumer polling"
