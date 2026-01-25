@@ -113,22 +113,22 @@ The plan follows a "commit-per-feature" approach where each commit:
     - **Validates: Requirements 2.2, 2.3, 2.4**
     - **Commit**: "test: add property tests for TCP server functionality"
 
-- [ ] 8. TCP Consumer Implementation
-  - [ ] 8.1 Create TCP consumer main function
+- [x] 8. TCP Consumer Implementation
+  - [x] 8.1 Create TCP consumer main function
     - Create src/tcp_consumer/main.cpp
     - Connect to publisher at 127.0.0.1:9000
     - Basic message receiving loop
     - _Requirements: 3.1, 3.2_
     - **Commit**: "feat: add TCP consumer with connection handling"
 
-  - [ ] 8.2 Add JSON parsing and logging
+  - [x] 8.2 Add JSON parsing and logging
     - Parse JSON messages from TCP stream
     - Handle partial reads and message boundaries
     - Add fmt library for structured logging
     - _Requirements: 3.2, 3.3, 3.4, 10.4_
     - **Commit**: "feat: add JSON parsing and structured logging"
 
-  - [ ] 8.3 Write property tests for TCP consumer
+  - [x] 8.3 Write property tests for TCP consumer
     - **Property 7: JSON parsing completeness**
     - **Property 8: TCP stream boundary handling**
     - **Validates: Requirements 3.2, 3.3**

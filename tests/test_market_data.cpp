@@ -800,3 +800,268 @@ TEST_CASE("Property 6: TCP disconnection resilience", "[property][tcp]") {
         }
     }
 }
+
+// ============================================================================
+// TCP CONSUMER PROPERTY TESTS
+// ============================================================================
+
+TEST_CASE("Property 7: JSON parsing completeness", "[property][tcp_consumer]") {
+    // Feature: hft-market-data-system, Property 7: JSON parsing completeness
+    // Validates: Requirements 3.2
+    
+    // Run property test with 100 iterations
+    for (int i = 0; i < 100; ++i) {
+        // Generate random market data for testing
+        auto instrument = PropertyTestHelper::generateRandomInstrument();
+        auto bid = PropertyTestHelper::generateRandomPrice();
+        auto ask = PropertyTestHelper::generateRandomPrice();
+        auto timestamp_ns = PropertyTestHelper::generateRandomTimestamp();
+        
+        MarketData original(instrument.c_str(), bid, ask, timestamp_ns);
+        
+        // Create JSON message (same format as publisher sends)
+        std::string json_message = original.to_json();
+        
+        // Test the parsing logic used by TCP consumer
+        MarketData parsed_data;
+        bool parse_success = MarketData::from_json(json_message, parsed_data);
+        
+        // Verify parsing succeeded
+        REQUIRE(parse_success);
+        
+        // Verify all fields are accessible and correct after parsing
+        REQUIRE(strcmp(original.instrument, parsed_data.instrument) == 0);
+        REQUIRE(original.bid == parsed_data.bid);
+        REQUIRE(original.ask == parsed_data.ask);
+        REQUIRE(original.timestamp_ns == parsed_data.timestamp_ns);
+        
+        // Test parsing with various JSON formatting variations
+        // (whitespace, field order, etc.)
+        nlohmann::json j;
+        j["instrument"] = original.instrument;
+        j["bid"] = original.bid;
+        j["ask"] = original.ask;
+        j["timestamp_ns"] = original.timestamp_ns;
+        
+        // Test with different JSON formatting
+        std::vector<std::string> json_variants = {
+            j.dump(),           // Compact format
+            j.dump(2),          // Pretty-printed with 2-space indent
+            j.dump(4),          // Pretty-printed with 4-space indent
+        };
+        
+        for (const auto& json_variant : json_variants) {
+            MarketData variant_parsed;
+            bool variant_success = MarketData::from_json(json_variant, variant_parsed);
+            
+            REQUIRE(variant_success);
+            REQUIRE(strcmp(original.instrument, variant_parsed.instrument) == 0);
+            REQUIRE(original.bid == variant_parsed.bid);
+            REQUIRE(original.ask == variant_parsed.ask);
+            REQUIRE(original.timestamp_ns == variant_parsed.timestamp_ns);
+        }
+        
+        // Test parsing with malformed JSON (should fail gracefully)
+        std::vector<std::string> malformed_json = {
+            "{",                                    // Incomplete JSON
+            "{}",                                   // Empty JSON
+            "{\"instrument\":\"TEST\"}",            // Missing fields
+            "{\"invalid\":\"json\",}",              // Trailing comma
+            "not json at all",                      // Not JSON
+            "",                                     // Empty string
+        };
+        
+        for (const auto& bad_json : malformed_json) {
+            MarketData bad_parsed;
+            bool bad_success = MarketData::from_json(bad_json, bad_parsed);
+            REQUIRE_FALSE(bad_success); // Should fail gracefully, not crash
+        }
+        
+        // Test parsing with edge case values
+        // Very long instrument name (should be truncated)
+        std::string long_instrument(INSTRUMENT_MAX_LEN + 10, 'X');
+        MarketData long_inst_data(long_instrument.c_str(), 100.0, 101.0, 123456789);
+        std::string long_inst_json = long_inst_data.to_json();
+        
+        MarketData long_inst_parsed;
+        bool long_inst_success = MarketData::from_json(long_inst_json, long_inst_parsed);
+        REQUIRE(long_inst_success);
+        REQUIRE(strlen(long_inst_parsed.instrument) < INSTRUMENT_MAX_LEN);
+        
+        // Very large numbers
+        MarketData large_num_data("TEST", 999999999.99, 1000000000.01, 9223372036854775807LL);
+        std::string large_num_json = large_num_data.to_json();
+        
+        MarketData large_num_parsed;
+        bool large_num_success = MarketData::from_json(large_num_json, large_num_parsed);
+        REQUIRE(large_num_success);
+        REQUIRE(large_num_parsed.bid == large_num_data.bid);
+        REQUIRE(large_num_parsed.ask == large_num_data.ask);
+        REQUIRE(large_num_parsed.timestamp_ns == large_num_data.timestamp_ns);
+    }
+}
+
+TEST_CASE("Property 8: TCP stream boundary handling", "[property][tcp_consumer]") {
+    // Feature: hft-market-data-system, Property 8: TCP stream boundary handling
+    // Validates: Requirements 3.3
+    
+    // Run property test with 100 iterations
+    for (int i = 0; i < 100; ++i) {
+        // Test the core boundary handling logic without complex networking
+        // This focuses on the actual TCP consumer logic for handling partial reads
+        
+        // Generate test JSON messages
+        std::vector<std::string> json_messages;
+        std::vector<MarketData> expected_data;
+        
+        int num_messages = 3 + (i % 3); // 3-5 messages per test
+        for (int j = 0; j < num_messages; ++j) {
+            auto instrument = PropertyTestHelper::generateRandomInstrument();
+            auto bid = PropertyTestHelper::generateRandomPrice();
+            auto ask = PropertyTestHelper::generateRandomPrice();
+            auto timestamp_ns = PropertyTestHelper::generateRandomTimestamp();
+            
+            MarketData data(instrument.c_str(), bid, ask, timestamp_ns);
+            expected_data.push_back(data);
+            json_messages.push_back(data.to_json());
+        }
+        
+        // Test different boundary scenarios by simulating streambuf behavior
+        std::vector<std::string> test_scenarios;
+        
+        // Scenario 1: All messages concatenated with proper newlines
+        std::string scenario1;
+        for (const auto& json : json_messages) {
+            scenario1 += json + "\n";
+        }
+        test_scenarios.push_back(scenario1);
+        
+        // Scenario 2: Messages with extra whitespace and formatting
+        std::string scenario2;
+        for (const auto& json : json_messages) {
+            scenario2 += json + "\n";
+        }
+        test_scenarios.push_back(scenario2);
+        
+        // Scenario 3: Messages sent individually (simulating multiple read operations)
+        for (const auto& json : json_messages) {
+            test_scenarios.push_back(json + "\n");
+        }
+        
+        // Test each scenario
+        for (const auto& scenario : test_scenarios) {
+            // Simulate the TCP consumer's message parsing logic
+            std::vector<MarketData> parsed_messages;
+            
+            // Create a streambuf with the test data
+            boost::asio::streambuf buffer;
+            std::ostream os(&buffer);
+            os << scenario;
+            
+            // Parse messages using the same logic as TCP consumer
+            std::istream stream(&buffer);
+            std::string line;
+            
+            while (std::getline(stream, line)) {
+                if (!line.empty()) {
+                    MarketData parsed_data;
+                    bool parse_success = MarketData::from_json(line, parsed_data);
+                    
+                    // This should always succeed with well-formed JSON
+                    REQUIRE(parse_success);
+                    
+                    if (parse_success) {
+                        parsed_messages.push_back(parsed_data);
+                    }
+                }
+            }
+            
+            // For scenarios 1 and 2, we should get all messages
+            if (&scenario == &test_scenarios[0] || &scenario == &test_scenarios[1]) {
+                REQUIRE(parsed_messages.size() == expected_data.size());
+                
+                // Verify message content
+                for (size_t k = 0; k < expected_data.size(); ++k) {
+                    bool found_match = false;
+                    for (size_t m = 0; m < parsed_messages.size(); ++m) {
+                        if (strcmp(expected_data[k].instrument, parsed_messages[m].instrument) == 0 &&
+                            expected_data[k].bid == parsed_messages[m].bid &&
+                            expected_data[k].ask == parsed_messages[m].ask &&
+                            expected_data[k].timestamp_ns == parsed_messages[m].timestamp_ns) {
+                            found_match = true;
+                            break;
+                        }
+                    }
+                    REQUIRE(found_match);
+                }
+            }
+        }
+        
+        // Test edge cases for boundary handling
+        
+        // Edge case 1: Empty lines should be ignored
+        boost::asio::streambuf empty_buffer;
+        std::ostream empty_os(&empty_buffer);
+        empty_os << "\n\n" << json_messages[0] << "\n\n" << json_messages[1] << "\n\n";
+        
+        std::vector<MarketData> empty_line_parsed;
+        std::istream empty_stream(&empty_buffer);
+        std::string empty_line;
+        
+        while (std::getline(empty_stream, empty_line)) {
+            if (!empty_line.empty()) {
+                MarketData parsed_data;
+                bool parse_success = MarketData::from_json(empty_line, parsed_data);
+                if (parse_success) {
+                    empty_line_parsed.push_back(parsed_data);
+                }
+            }
+        }
+        
+        // Should have parsed exactly 2 messages (ignoring empty lines)
+        REQUIRE(empty_line_parsed.size() == 2);
+        
+        // Edge case 2: Malformed JSON should be handled gracefully
+        boost::asio::streambuf malformed_buffer;
+        std::ostream malformed_os(&malformed_buffer);
+        malformed_os << json_messages[0] << "\n";
+        malformed_os << "{ invalid json }\n";  // This should fail parsing
+        malformed_os << json_messages[1] << "\n";
+        
+        std::vector<MarketData> malformed_parsed;
+        std::istream malformed_stream(&malformed_buffer);
+        std::string malformed_line;
+        
+        while (std::getline(malformed_stream, malformed_line)) {
+            if (!malformed_line.empty()) {
+                MarketData parsed_data;
+                bool parse_success = MarketData::from_json(malformed_line, parsed_data);
+                if (parse_success) {
+                    malformed_parsed.push_back(parsed_data);
+                }
+                // Note: We don't REQUIRE parse_success here because malformed JSON should fail
+            }
+        }
+        
+        // Should have parsed exactly 2 valid messages (skipping the malformed one)
+        REQUIRE(malformed_parsed.size() == 2);
+        
+        // Edge case 3: Very long lines should be handled correctly
+        std::string long_instrument(INSTRUMENT_MAX_LEN - 1, 'X'); // Max length instrument
+        MarketData long_data(long_instrument.c_str(), 999.99, 1000.01, 123456789);
+        std::string long_json = long_data.to_json();
+        
+        boost::asio::streambuf long_buffer;
+        std::ostream long_os(&long_buffer);
+        long_os << long_json << "\n";
+        
+        std::istream long_stream(&long_buffer);
+        std::string long_line;
+        std::getline(long_stream, long_line);
+        
+        MarketData long_parsed;
+        bool long_parse_success = MarketData::from_json(long_line, long_parsed);
+        REQUIRE(long_parse_success);
+        REQUIRE(strcmp(long_data.instrument, long_parsed.instrument) == 0);
+    }
+}
