@@ -2,6 +2,7 @@
 #include <common/market_data.hpp>
 #include <common/fast_clock.hpp>
 #include <common/ring_buffer.hpp>
+#include <common/performance_utils.hpp>
 #include <string>
 #include <cstring>
 #include <random>
@@ -10,6 +11,7 @@
 #include <vector>
 #include <set>
 #include <sys/mman.h>
+#include <cstdlib>
 
 using namespace hft;
 
@@ -228,23 +230,90 @@ TEST_CASE("Property 3: Fixed-size instrument name compliance", "[property][marke
     }
 }
 
-TEST_CASE("Property 3: Memory alignment verification", "[property][market_data]") {
+TEST_CASE("Property 10: Memory alignment verification", "[property][memory_alignment]") {
     // Feature: hft-market-data-system, Property 10: Memory alignment verification
     // Validates: Requirements 4.3
     
     // Run property test with 100 iterations
     for (int i = 0; i < 100; ++i) {
-        MarketData data;
+        // Test MarketData alignment
+        MarketData market_data;
         
-        // Verify size is exactly 64 bytes
+        // Verify MarketData size is exactly 64 bytes
         REQUIRE(sizeof(MarketData) == 64);
         
-        // Verify alignment is 64 bytes
+        // Verify MarketData alignment is 64 bytes
         REQUIRE(alignof(MarketData) == 64);
         
-        // Verify the actual object is aligned to 64-byte boundary
-        uintptr_t addr = reinterpret_cast<uintptr_t>(&data);
-        REQUIRE((addr % 64) == 0);
+        // Verify the actual MarketData object is aligned to 64-byte boundary
+        uintptr_t market_data_addr = reinterpret_cast<uintptr_t>(&market_data);
+        REQUIRE((market_data_addr % 64) == 0);
+        
+        // Test RingBuffer alignment
+        RingBuffer ring_buffer;
+        
+        // Verify RingBuffer alignment is 64 bytes
+        REQUIRE(alignof(RingBuffer) == 64);
+        
+        // Verify the actual RingBuffer object is aligned to 64-byte boundary
+        uintptr_t ring_buffer_addr = reinterpret_cast<uintptr_t>(&ring_buffer);
+        REQUIRE((ring_buffer_addr % 64) == 0);
+        
+        // Test that critical data structures prevent false sharing
+        // by verifying they are aligned to cache line boundaries
+        
+        // Create multiple MarketData objects and verify they don't share cache lines
+        MarketData data_array[3];
+        for (int j = 0; j < 3; ++j) {
+            uintptr_t addr = reinterpret_cast<uintptr_t>(&data_array[j]);
+            REQUIRE((addr % 64) == 0); // Each should be on its own cache line
+        }
+        
+        // Test alignment with dynamic allocation
+        auto* dynamic_market_data = new MarketData();
+        uintptr_t dynamic_addr = reinterpret_cast<uintptr_t>(dynamic_market_data);
+        REQUIRE((dynamic_addr % 64) == 0);
+        delete dynamic_market_data;
+        
+        // Test alignment with shared memory allocation simulation
+        // Allocate aligned memory similar to how shared memory would work
+        void* aligned_mem = nullptr;
+        int result = posix_memalign(&aligned_mem, 64, sizeof(RingBuffer));
+        REQUIRE(result == 0);
+        REQUIRE(aligned_mem != nullptr);
+        
+        // Verify the aligned memory is properly aligned
+        uintptr_t aligned_addr = reinterpret_cast<uintptr_t>(aligned_mem);
+        REQUIRE((aligned_addr % 64) == 0);
+        
+        // Construct RingBuffer in aligned memory and verify it maintains alignment
+        RingBuffer* aligned_ring_buffer = new(aligned_mem) RingBuffer();
+        uintptr_t constructed_addr = reinterpret_cast<uintptr_t>(aligned_ring_buffer);
+        REQUIRE((constructed_addr % 64) == 0);
+        
+        // Clean up
+        aligned_ring_buffer->~RingBuffer();
+        free(aligned_mem);
+        
+        // Test that the performance utilities can verify alignment correctly
+        REQUIRE(hft::MemoryUtils::is_aligned(&market_data, 64));
+        REQUIRE(hft::MemoryUtils::is_aligned(&ring_buffer, 64));
+        
+        // Test type alignment verification
+        REQUIRE(hft::MemoryUtils::is_type_aligned<MarketData>(64));
+        REQUIRE(hft::MemoryUtils::is_type_aligned<RingBuffer>(64));
+        
+        // Test cache line size detection
+        size_t cache_line_size = hft::MemoryUtils::get_cache_line_size();
+        REQUIRE(cache_line_size >= 32); // Should be at least 32 bytes
+        REQUIRE(cache_line_size <= 128); // Should not exceed 128 bytes
+        REQUIRE((cache_line_size & (cache_line_size - 1)) == 0); // Should be power of 2
+        
+        // Verify our structures are aligned to detected cache line size
+        if (cache_line_size == 64) {
+            REQUIRE((market_data_addr % cache_line_size) == 0);
+            REQUIRE((ring_buffer_addr % cache_line_size) == 0);
+        }
     }
 }
 

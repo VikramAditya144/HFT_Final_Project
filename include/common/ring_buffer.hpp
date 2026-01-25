@@ -184,6 +184,11 @@ public:
     [[nodiscard]] size_t get_read_index() const noexcept {
         return read_idx.load(std::memory_order_relaxed);
     }
+    
+    // Get buffer address for memory prefetching (advanced optimization)
+    [[nodiscard]] const MarketData* get_buffer_address() const noexcept {
+        return buffer;
+    }
 };
 
 // ============================================================================

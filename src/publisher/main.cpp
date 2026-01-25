@@ -12,6 +12,7 @@
 #include "common/shared_memory.hpp"
 #include "common/ring_buffer.hpp"
 #include "common/fast_clock.hpp"
+#include "common/performance_utils.hpp"
 #include <fmt/chrono.h> // For timestamp formatting
 #include <fmt/core.h>   // For fmt::print (fast, type-safe printing)
 #include <boost/asio.hpp>
@@ -39,6 +40,15 @@ public:
         : io_context_(io_context)
         , acceptor_(io_context, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port))
     {
+        // Apply optimizations to the acceptor socket
+        try {
+            // Enable socket reuse to avoid "Address already in use" errors
+            acceptor_.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
+            fmt::print("Applied acceptor socket optimizations\n");
+        } catch (const std::exception& e) {
+            fmt::print("Warning: Failed to apply acceptor optimizations: {}\n", e.what());
+        }
+        
         fmt::print("TCP Server listening on 127.0.0.1:{}\n", port);
         start_accept();
     }
@@ -52,6 +62,9 @@ private:
                 if (!ec) {
                     fmt::print("New TCP client connected from {}\n", 
                               new_socket->remote_endpoint().address().to_string());
+                    
+                    // Apply TCP performance optimizations
+                    apply_tcp_optimizations(*new_socket);
                     
                     // Add client to our set
                     {
@@ -88,6 +101,38 @@ private:
                     setup_disconnect_detection(socket);
                 }
             });
+    }
+    
+    void apply_tcp_optimizations(boost::asio::ip::tcp::socket& socket) {
+        try {
+            // Enable TCP_NODELAY to disable Nagle's algorithm
+            // This ensures immediate packet transmission without waiting for more data
+            // Critical for low-latency applications like HFT
+            boost::asio::ip::tcp::no_delay no_delay_option(true);
+            socket.set_option(no_delay_option);
+            fmt::print("Applied TCP_NODELAY optimization\n");
+            
+            // Configure socket buffer sizes for optimal throughput
+            // Larger buffers can improve throughput but may increase latency
+            // For HFT, we balance between throughput and latency
+            
+            // Set send buffer size (SO_SNDBUF)
+            constexpr int send_buffer_size = 65536; // 64KB
+            boost::asio::socket_base::send_buffer_size send_option(send_buffer_size);
+            socket.set_option(send_option);
+            
+            // Set receive buffer size (SO_RCVBUF) 
+            constexpr int recv_buffer_size = 65536; // 64KB
+            boost::asio::socket_base::receive_buffer_size recv_option(recv_buffer_size);
+            socket.set_option(recv_option);
+            
+            fmt::print("Applied socket buffer optimizations (send: {}KB, recv: {}KB)\n", 
+                      send_buffer_size / 1024, recv_buffer_size / 1024);
+                      
+        } catch (const std::exception& e) {
+            fmt::print("Warning: Failed to apply TCP optimizations: {}\n", e.what());
+            // Continue operation even if optimizations fail
+        }
     }
 
 public:
@@ -131,6 +176,49 @@ int main() {
   fmt::print("===========================================\n\n");
 
   try {
+    // ========================================================================
+    // STEP 0: Apply Performance Optimizations
+    // ========================================================================
+    fmt::print("Applying performance optimizations...\n");
+    
+    // Get system information
+    int cpu_count = hft::CpuAffinity::get_cpu_count();
+    size_t cache_line_size = hft::MemoryUtils::get_cache_line_size();
+    
+    fmt::print("System info: {} CPU cores, {} byte cache lines\n", cpu_count, cache_line_size);
+    
+    // Set CPU affinity to core 0 for consistent performance
+    // In production, you might want to use a dedicated core
+    if (cpu_count > 0) {
+        bool affinity_set = hft::CpuAffinity::set_thread_affinity(0);
+        if (affinity_set) {
+            fmt::print("Successfully bound main thread to CPU core 0\n");
+            
+            // Verify current CPU (Linux only)
+            int current_cpu = hft::CpuAffinity::get_current_cpu();
+            if (current_cpu >= 0) {
+                fmt::print("Current CPU: {}\n", current_cpu);
+            }
+        } else {
+            fmt::print("Warning: Failed to set CPU affinity (may not be supported on this platform)\n");
+        }
+    }
+    
+    // Verify memory alignment of critical data structures
+    fmt::print("Verifying memory alignment...\n");
+    
+    // Check MarketData alignment
+    bool market_data_aligned = hft::MemoryUtils::is_type_aligned<hft::MarketData>(64);
+    fmt::print("MarketData 64-byte aligned: {}\n", market_data_aligned ? "YES" : "NO");
+    
+    // Check RingBuffer alignment  
+    bool ring_buffer_aligned = hft::MemoryUtils::is_type_aligned<hft::RingBuffer>(64);
+    fmt::print("RingBuffer 64-byte aligned: {}\n", ring_buffer_aligned ? "YES" : "NO");
+    
+    if (!market_data_aligned || !ring_buffer_aligned) {
+        fmt::print("WARNING: Critical data structures are not properly aligned!\n");
+    }
+    
     // ========================================================================
     // STEP 1: Initialize Boost.Asio IO Context and TCP Server
     // ========================================================================
@@ -218,6 +306,13 @@ int main() {
       
       // Create market data message
       hft::MarketData market_data(instrument.c_str(), bid, ask, timestamp);
+      
+      // Memory optimization: prefetch the next ring buffer slot for writing
+      size_t next_write_idx = ring_buffer->get_write_index();
+      const hft::MarketData* buffer_addr = ring_buffer->get_buffer_address();
+      if (buffer_addr && next_write_idx < hft::RING_BUFFER_SIZE) {
+          hft::MemoryUtils::prefetch_write(&buffer_addr[next_write_idx]);
+      }
       
       // Try to write to ring buffer
       if (ring_buffer->try_write(market_data)) {
