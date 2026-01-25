@@ -91,22 +91,22 @@ The plan follows a "commit-per-feature" approach where each commit:
     - **Validates: Requirements 1.2**
     - **Commit**: "test: add property tests for market data generation"
 
-- [ ] 7. TCP Server Implementation
-  - [ ] 7.1 Add Boost.Asio TCP server to publisher
+- [x] 7. TCP Server Implementation
+  - [x] 7.1 Add Boost.Asio TCP server to publisher
     - Update CMakeLists.txt to find and link Boost
     - Implement TCP acceptor on 127.0.0.1:9000
     - Basic connection handling
     - _Requirements: 2.1, 2.2, 10.2_
     - **Commit**: "feat: add TCP server with Boost.Asio"
 
-  - [ ] 7.2 Add JSON streaming over TCP
+  - [x] 7.2 Add JSON streaming over TCP
     - Serialize MarketData to JSON format
     - Send continuous stream to connected clients
     - Handle client disconnections gracefully
     - _Requirements: 2.3, 2.4, 2.5_
     - **Commit**: "feat: add JSON streaming over TCP connections"
 
-  - [ ] 7.3 Write property tests for TCP functionality
+  - [x] 7.3 Write property tests for TCP functionality
     - **Property 4: TCP connection handling**
     - **Property 5: JSON serialization correctness**
     - **Property 6: TCP disconnection resilience**

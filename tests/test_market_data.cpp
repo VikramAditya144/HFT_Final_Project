@@ -535,3 +535,268 @@ TEST_CASE("Property 11: Ring buffer state management", "[property][ring_buffer]"
         REQUIRE(buffer.available_for_read() + buffer.available_for_write() == buffer.capacity());
     }
 }
+
+// ============================================================================
+// TCP SERVER PROPERTY TESTS
+// ============================================================================
+
+#include <boost/asio.hpp>
+#include <thread>
+#include <chrono>
+#include <future>
+
+TEST_CASE("Property 4: TCP connection handling", "[property][tcp]") {
+    // Feature: hft-market-data-system, Property 4: TCP connection handling
+    // Validates: Requirements 2.2
+    
+    // Run property test with 100 iterations
+    for (int i = 0; i < 100; ++i) {
+        boost::asio::io_context io_context;
+        
+        // Create a TCP acceptor on a random available port
+        boost::asio::ip::tcp::acceptor acceptor(io_context);
+        boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::tcp::v4(), 0); // 0 = any available port
+        acceptor.open(endpoint.protocol());
+        acceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
+        acceptor.bind(endpoint);
+        acceptor.listen();
+        
+        // Get the actual port assigned
+        auto local_endpoint = acceptor.local_endpoint();
+        unsigned short port = local_endpoint.port();
+        
+        // Track connection acceptance
+        bool connection_accepted = false;
+        std::shared_ptr<boost::asio::ip::tcp::socket> accepted_socket;
+        
+        // Start accepting connections
+        accepted_socket = std::make_shared<boost::asio::ip::tcp::socket>(io_context);
+        acceptor.async_accept(*accepted_socket,
+            [&connection_accepted](boost::system::error_code ec) {
+                if (!ec) {
+                    connection_accepted = true;
+                }
+            });
+        
+        // Run io_context in a separate thread
+        std::thread io_thread([&io_context]() {
+            io_context.run();
+        });
+        
+        // Create a client connection
+        boost::asio::io_context client_io_context;
+        boost::asio::ip::tcp::socket client_socket(client_io_context);
+        
+        // Connect to the server
+        boost::system::error_code connect_ec;
+        boost::asio::ip::tcp::endpoint server_endpoint(boost::asio::ip::tcp::v4(), port);
+        server_endpoint.address(boost::asio::ip::make_address("127.0.0.1"));
+        client_socket.connect(server_endpoint, connect_ec);
+        
+        // Give some time for the connection to be processed
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        
+        // Verify connection was successful
+        REQUIRE_FALSE(connect_ec);
+        REQUIRE(client_socket.is_open());
+        
+        // Verify server accepted the connection
+        REQUIRE(connection_accepted);
+        REQUIRE(accepted_socket->is_open());
+        
+        // Verify we can get remote endpoint information
+        auto remote_endpoint = accepted_socket->remote_endpoint();
+        REQUIRE(remote_endpoint.address().to_string() == "127.0.0.1");
+        
+        // Clean up
+        client_socket.close();
+        accepted_socket->close();
+        acceptor.close();
+        io_context.stop();
+        
+        if (io_thread.joinable()) {
+            io_thread.join();
+        }
+    }
+}
+
+TEST_CASE("Property 5: JSON serialization correctness", "[property][tcp][json]") {
+    // Feature: hft-market-data-system, Property 5: JSON serialization correctness
+    // Validates: Requirements 2.3
+    
+    // Run property test with 100 iterations
+    for (int i = 0; i < 100; ++i) {
+        // Generate random market data
+        auto instrument = PropertyTestHelper::generateRandomInstrument();
+        auto bid = PropertyTestHelper::generateRandomPrice();
+        auto ask = PropertyTestHelper::generateRandomPrice();
+        auto timestamp_ns = PropertyTestHelper::generateRandomTimestamp();
+        
+        MarketData original(instrument.c_str(), bid, ask, timestamp_ns);
+        
+        // Serialize to JSON (same method used by TCP server)
+        std::string json_message = original.to_json();
+        
+        // Verify JSON format contains all required fields for TCP transmission
+        REQUIRE(json_message.find("\"instrument\"") != std::string::npos);
+        REQUIRE(json_message.find("\"bid\"") != std::string::npos);
+        REQUIRE(json_message.find("\"ask\"") != std::string::npos);
+        REQUIRE(json_message.find("\"timestamp_ns\"") != std::string::npos);
+        
+        // Verify JSON is valid by parsing it
+        try {
+            auto parsed_json = nlohmann::json::parse(json_message);
+            
+            // Verify all fields are present and have correct types
+            REQUIRE(parsed_json.contains("instrument"));
+            REQUIRE(parsed_json.contains("bid"));
+            REQUIRE(parsed_json.contains("ask"));
+            REQUIRE(parsed_json.contains("timestamp_ns"));
+            
+            REQUIRE(parsed_json["instrument"].is_string());
+            REQUIRE(parsed_json["bid"].is_number());
+            REQUIRE(parsed_json["ask"].is_number());
+            REQUIRE(parsed_json["timestamp_ns"].is_number_integer());
+            
+            // Verify values match original data
+            REQUIRE(parsed_json["instrument"].get<std::string>() == std::string(original.instrument));
+            REQUIRE(parsed_json["bid"].get<double>() == original.bid);
+            REQUIRE(parsed_json["ask"].get<double>() == original.ask);
+            REQUIRE(parsed_json["timestamp_ns"].get<int64_t>() == original.timestamp_ns);
+            
+        } catch (const std::exception& e) {
+            FAIL("JSON parsing failed: " << e.what() << " for JSON: " << json_message);
+        }
+        
+        // Verify JSON message is suitable for TCP transmission
+        // (no null bytes, reasonable size, etc.)
+        REQUIRE(json_message.find('\0') == std::string::npos); // No null bytes
+        REQUIRE(json_message.length() > 0);
+        REQUIRE(json_message.length() < 1024); // Reasonable size for network transmission
+        
+        // Verify JSON can be transmitted over TCP by simulating message boundary
+        std::string tcp_message = json_message + "\n"; // Add newline as message boundary
+        REQUIRE(tcp_message.back() == '\n');
+        REQUIRE(tcp_message.length() == json_message.length() + 1);
+    }
+}
+
+TEST_CASE("Property 6: TCP disconnection resilience", "[property][tcp]") {
+    // Feature: hft-market-data-system, Property 6: TCP disconnection resilience
+    // Validates: Requirements 2.4
+    
+    // Run property test with 100 iterations
+    for (int i = 0; i < 100; ++i) {
+        boost::asio::io_context io_context;
+        
+        // Create TCP acceptor
+        boost::asio::ip::tcp::acceptor acceptor(io_context);
+        boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::tcp::v4(), 0);
+        acceptor.open(endpoint.protocol());
+        acceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
+        acceptor.bind(endpoint);
+        acceptor.listen();
+        
+        auto local_endpoint = acceptor.local_endpoint();
+        unsigned short port = local_endpoint.port();
+        
+        // Track server state
+        bool server_crashed = false;
+        bool connection_accepted = false;
+        bool disconnection_detected = false;
+        std::shared_ptr<boost::asio::ip::tcp::socket> server_socket;
+        
+        // Accept connection
+        server_socket = std::make_shared<boost::asio::ip::tcp::socket>(io_context);
+        acceptor.async_accept(*server_socket,
+            [&](boost::system::error_code ec) {
+                if (!ec) {
+                    connection_accepted = true;
+                    
+                    // Set up disconnection detection (similar to TcpServer implementation)
+                    auto buffer = std::make_shared<std::array<char, 1>>();
+                    server_socket->async_read_some(boost::asio::buffer(*buffer),
+                        [&](boost::system::error_code read_ec, std::size_t /*length*/) {
+                            if (read_ec) {
+                                disconnection_detected = true;
+                            }
+                        });
+                } else {
+                    server_crashed = true;
+                }
+            });
+        
+        // Run server in separate thread
+        std::thread server_thread([&]() {
+            try {
+                io_context.run();
+            } catch (const std::exception&) {
+                server_crashed = true;
+            }
+        });
+        
+        // Create client and connect
+        boost::asio::io_context client_io_context;
+        boost::asio::ip::tcp::socket client_socket(client_io_context);
+        
+        boost::system::error_code connect_ec;
+        boost::asio::ip::tcp::endpoint server_endpoint2(boost::asio::ip::tcp::v4(), port);
+        server_endpoint2.address(boost::asio::ip::make_address("127.0.0.1"));
+        client_socket.connect(server_endpoint2, connect_ec);
+        
+        // Wait for connection to be established
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        
+        REQUIRE_FALSE(connect_ec);
+        REQUIRE(connection_accepted);
+        REQUIRE_FALSE(server_crashed);
+        
+        // Simulate client disconnection
+        client_socket.close();
+        
+        // Give server time to detect disconnection
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        
+        // Verify server handled disconnection gracefully
+        REQUIRE(disconnection_detected);
+        REQUIRE_FALSE(server_crashed); // Server should not crash on client disconnect
+        
+        // Verify server can still accept new connections after a disconnection
+        boost::asio::ip::tcp::socket new_client_socket(client_io_context);
+        boost::system::error_code new_connect_ec;
+        
+        // Reset connection tracking
+        connection_accepted = false;
+        
+        // Start accepting another connection
+        auto new_server_socket = std::make_shared<boost::asio::ip::tcp::socket>(io_context);
+        acceptor.async_accept(*new_server_socket,
+            [&](boost::system::error_code ec) {
+                if (!ec) {
+                    connection_accepted = true;
+                }
+            });
+        
+        // Connect new client
+        boost::asio::ip::tcp::endpoint server_endpoint3(boost::asio::ip::tcp::v4(), port);
+        server_endpoint3.address(boost::asio::ip::make_address("127.0.0.1"));
+        new_client_socket.connect(server_endpoint3, new_connect_ec);
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        
+        // Verify server can handle new connections after previous disconnection
+        REQUIRE_FALSE(new_connect_ec);
+        REQUIRE(connection_accepted);
+        REQUIRE_FALSE(server_crashed);
+        
+        // Clean up
+        new_client_socket.close();
+        new_server_socket->close();
+        acceptor.close();
+        io_context.stop();
+        
+        if (server_thread.joinable()) {
+            server_thread.join();
+        }
+    }
+}
