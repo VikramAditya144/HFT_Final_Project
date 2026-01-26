@@ -106,7 +106,7 @@ The plan follows a "commit-per-feature" approach where each commit:
     - _Requirements: 2.3, 2.4, 2.5_
     - **Commit**: "feat: add JSON streaming over TCP connections"
 
-  - [x] 7.3 Write property tests for TCP functionality
+  - [ ] 7.3 Write property tests for TCP functionality
     - **Property 4: TCP connection handling**
     - **Property 5: JSON serialization correctness**
     - **Property 6: TCP disconnection resilience**
@@ -185,7 +185,7 @@ The plan follows a "commit-per-feature" approach where each commit:
     - **Validates: Requirements 4.3**
     - **Commit**: "test: add property tests for memory alignment"
 
-- [-] 12. Checkpoint - Core HFT System Complete
+- [x] 12. Checkpoint - Core HFT System Complete
   - Ensure all HFT components compile and run
   - Verify TCP and SHM data paths work correctly
   - Run all property tests and ensure they pass
